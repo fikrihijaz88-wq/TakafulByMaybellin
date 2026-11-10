@@ -1,0 +1,8 @@
+{
+  "name": "Portal Promosi & Suite Ejen AI Great Eastern Takaful",
+  "description": "Portal promosi produk Takaful Keluarga Great Eastern Takaful Berhad (GETB) lengkap dengan Suite Ejen AI untuk kajian produk, analisis pasaran sasaran, penciptaan kandungan media sosial viral, dan skrip closing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
