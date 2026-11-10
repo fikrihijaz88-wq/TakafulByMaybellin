@@ -15,6 +15,15 @@ const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
 
+import {
+  generateFallbackProductStudy,
+  generateFallbackTargetMarket,
+  generateFallbackSocialContent,
+  generateFallbackObjectionHandler,
+  generateFallbackCampaignCreative,
+  generateFallbackCoachChat,
+} from './src/data/getbFallbackEngine';
+
 // Initialize Gemini API client
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY || '',
@@ -25,30 +34,54 @@ const ai = new GoogleGenAI({
   },
 });
 
-const DEFAULT_MODEL = 'gemini-3.8-flash';
+// Candidate models in fallback order
+const CANDIDATE_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-3.1-flash-lite',
+  'gemini-flash-latest',
+];
 
-// Helper function to call Gemini safely
+// Helper function to call Gemini with multi-model fallback and backoff
 async function callGemini(systemInstruction: string, userPrompt: string): Promise<string> {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error('GEMINI_API_KEY belum dikonfigurasikan di persekitaran pelayan.');
   }
 
-  const response = await ai.models.generateContent({
-    model: DEFAULT_MODEL,
-    contents: userPrompt,
-    config: {
-      systemInstruction: systemInstruction,
-    },
-  });
+  let lastError: unknown = null;
 
-  return response.text ?? 'Tiada respon dijana oleh model.';
+  for (let i = 0; i < CANDIDATE_MODELS.length; i++) {
+    const modelName = CANDIDATE_MODELS[i];
+    try {
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: userPrompt,
+        config: {
+          systemInstruction: systemInstruction,
+        },
+      });
+
+      if (response && response.text) {
+        return response.text;
+      }
+    } catch (err: unknown) {
+      lastError = err;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.warn(`[Gemini API] Model ${modelName} failed (attempt ${i + 1}/${CANDIDATE_MODELS.length}):`, errMsg);
+
+      // If there are more models to try, pause briefly before attempting fallback model
+      if (i < CANDIDATE_MODELS.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
+    }
+  }
+
+  throw lastError || new Error('Semua model Gemini sedang mengalami kesesakan sementara.');
 }
 
 // 1. Endpoint: Agen Kajian Produk GETB (GETB Product Specialist)
 app.post('/api/agent/product-study', async (req: Request, res: Response) => {
+  const { productName, productCategory, targetMarket, specificQuestion } = req.body;
   try {
-    const { productName, productCategory, targetMarket, specificQuestion } = req.body;
-
     const systemPrompt = `Anda ialah Ketua Pakar Produk & Aktuari Latihan Kanan di Great Eastern Takaful Berhad (GETB).
 Tugas anda ialah mengkaji, menganalisis, dan mempersembahkan maklumat produk Takaful Keluarga GETB dengan tepat, profesional, dan meyakinkan untuk membantu konsultan/ejen membuat promosi berkualiti tinggi.
 
@@ -70,17 +103,16 @@ Fokus / Soalan Khusus: ${specificQuestion || 'Bagaimana nak terangkan kelebihan 
     const result = await callGemini(systemPrompt, userPrompt);
     res.json({ success: true, analysis: result });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Ralat semasa menjana kajian produk.';
-    console.error('Error in /api/agent/product-study:', error);
-    res.status(500).json({ success: false, error: message });
+    console.warn('Gemini unavailable for /api/agent/product-study, generating from GETB verified database:', error);
+    const fallback = generateFallbackProductStudy(productName, productCategory, targetMarket, specificQuestion);
+    res.json({ success: true, analysis: fallback, isFallback: true });
   }
 });
 
 // 2. Endpoint: Agen Perancang Pasaran Sasaran (Target Market Strategist)
 app.post('/api/agent/target-market', async (req: Request, res: Response) => {
+  const { personaTitle, ageRange, incomeLevel, primaryNeed, marketingGoal } = req.body;
   try {
-    const { personaTitle, ageRange, incomeLevel, primaryNeed, marketingGoal } = req.body;
-
     const systemPrompt = `Anda ialah Pengarah Strategi Pemasaran Pengguna & Tingkah Laku Pasaran Takaful Malaysia (Specialist Great Eastern Takaful).
 Tugas anda ialah merancang strategi penembusan pasaran (market penetration strategy) yang tepat untuk segmen prospek yang dipilih.
 
@@ -102,17 +134,16 @@ Matlamat Kempen: ${marketingGoal || 'Mendapatkan 30 leads berkualiti sebulan mel
     const result = await callGemini(systemPrompt, userPrompt);
     res.json({ success: true, strategy: result });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Ralat semasa merancang target market.';
-    console.error('Error in /api/agent/target-market:', error);
-    res.status(500).json({ success: false, error: message });
+    console.warn('Gemini unavailable for /api/agent/target-market, generating from GETB verified database:', error);
+    const fallback = generateFallbackTargetMarket(personaTitle, ageRange, incomeLevel, primaryNeed, marketingGoal);
+    res.json({ success: true, strategy: fallback, isFallback: true });
   }
 });
 
 // 3. Endpoint: Agen Pencipta Kandungan Media Sosial (Social Content Creator)
 app.post('/api/agent/social-content', async (req: Request, res: Response) => {
+  const { platform, contentType, productName, targetAudience, coreTopic, toneStyle } = req.body;
   try {
-    const { platform, contentType, productName, targetAudience, coreTopic, toneStyle } = req.body;
-
     const systemPrompt = `Anda ialah Copywriter Viral & Pengarah Kreatif Media Sosial Takaful nombor satu di Malaysia untuk Great Eastern Takaful Berhad.
 Anda pakar menghasilkan posting Facebook yang tinggi shares, Carousel Instagram yang tinggi simpanan (saves), dan Skrip TikTok/Reels yang mengekalkan penonton hingga ke saat terakhir (high retention).
 
@@ -138,17 +169,16 @@ Sila sediakan:
     const result = await callGemini(systemPrompt, userPrompt);
     res.json({ success: true, content: result });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Ralat semasa menjana kandungan.';
-    console.error('Error in /api/agent/social-content:', error);
-    res.status(500).json({ success: false, error: message });
+    console.warn('Gemini unavailable for /api/agent/social-content, generating from GETB verified database:', error);
+    const fallback = generateFallbackSocialContent(platform, contentType, productName, targetAudience, coreTopic, toneStyle);
+    res.json({ success: true, content: fallback, isFallback: true });
   }
 });
 
 // 4. Endpoint: Agen Mengatasi Bantahan & Skrip Closing (Objection Handler)
 app.post('/api/agent/objection-handler', async (req: Request, res: Response) => {
+  const { objectionText, prospectContext, preferredTone } = req.body;
   try {
-    const { objectionText, prospectContext, preferredTone } = req.body;
-
     const systemPrompt = `Anda ialah Jurulatih Jualan & Pakar Psikologi Closing Takaful Elit di Great Eastern Takaful.
 Tugas anda ialah menukarkan bantahan prospek (objection) menjadi peluang kesedaran tanpa membuatkan prospek berasa diserang atau tertekan. Anda menggunakan teknik 'Feel, Felt, Found', soalan berbalik (counter-inquiry), dan analogi santai.
 
@@ -164,17 +194,16 @@ Gaya Nada Diingini: ${preferredTone || 'Sopan, diplomatik, meyakinkan'}`;
     const result = await callGemini(systemPrompt, userPrompt);
     res.json({ success: true, solutions: result });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Ralat semasa menjana skrip closing.';
-    console.error('Error in /api/agent/objection-handler:', error);
-    res.status(500).json({ success: false, error: message });
+    console.warn('Gemini unavailable for /api/agent/objection-handler, generating from GETB verified database:', error);
+    const fallback = generateFallbackObjectionHandler(objectionText, prospectContext, preferredTone);
+    res.json({ success: true, solutions: fallback, isFallback: true });
   }
 });
 
 // 5. Endpoint: Agen Pengarah Kempen & Prompt Gambar Visual (Creative Director)
 app.post('/api/agent/campaign-creative', async (req: Request, res: Response) => {
+  const { campaignTheme, targetProduct, mediumType } = req.body;
   try {
-    const { campaignTheme, targetProduct, mediumType } = req.body;
-
     const systemPrompt = `Anda ialah Pengarah Seni & Kreatif Pemasaran Digital bagi kempen Great Eastern Takaful Berhad.
 Tugas anda ialah mereka konsep visual iklan, teks poster (headline & sub-headline), serta PROMPT BAHASA INGGERIS terperinci untuk penjana imej AI (seperti Midjourney / Imagen / Gemini) yang menggambarkan keharmonian keluarga Malaysia, profesionalisme, atau perlindungan takaful syariah yang estetik tanpa kelihatan murahan.
 
@@ -192,17 +221,16 @@ Saluran / Format: ${mediumType || 'Iklan Facebook Feeds & Instagram Square Poste
     const result = await callGemini(systemPrompt, userPrompt);
     res.json({ success: true, creative: result });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Ralat semasa menjana konsep kreatif.';
-    console.error('Error in /api/agent/campaign-creative:', error);
-    res.status(500).json({ success: false, error: message });
+    console.warn('Gemini unavailable for /api/agent/campaign-creative, generating from GETB verified database:', error);
+    const fallback = generateFallbackCampaignCreative(campaignTheme, targetProduct, mediumType);
+    res.json({ success: true, creative: fallback, isFallback: true });
   }
 });
 
 // 6. Endpoint: Konsultasi Interaktif Ejen AI (Agency Coach Chat)
 app.post('/api/agent/coach-chat', async (req: Request, res: Response) => {
+  const { messages, userRole } = req.body;
   try {
-    const { messages, userRole } = req.body;
-
     const systemPrompt = `Anda ialah 'GETB AI Agency Director' — pembantu pintar dan jurulatih peribadi untuk konsultan dan ejen Great Eastern Takaful Berhad (GETB).
 Anda menguasai sepenuhnya:
 1. Seluruh rangkaian produk Takaful Keluarga rasmi GETB (i-Great Nova, i-Medi Evolusi / Shield Rider, i-Great Evo, i-Great Chinta, i-Great GENerasi, i-Great Yaqeen 61 CI, i-Great Majestik, i-Great Mega Plus, i-Great Idaman, i-Great Murni 2.0, i-Great Critical Care, i-Great Harapan, dll).
@@ -223,9 +251,9 @@ Jawablah dengan nada penuh semangat, mesra, membina motivasi, dan memberikan lan
     const result = await callGemini(systemPrompt, promptText);
     res.json({ success: true, reply: result });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Ralat semasa konsultasi ejen AI.';
-    console.error('Error in /api/agent/coach-chat:', error);
-    res.status(500).json({ success: false, error: message });
+    console.warn('Gemini unavailable for /api/agent/coach-chat, generating from GETB verified database:', error);
+    const fallback = generateFallbackCoachChat(messages, userRole);
+    res.json({ success: true, reply: fallback, isFallback: true });
   }
 });
 

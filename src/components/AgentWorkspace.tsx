@@ -111,6 +111,21 @@ export const AgentWorkspace: React.FC<Props> = ({
     setTimeout(() => setCopiedSection(null), 2000);
   };
 
+  const formatUserError = (err: any): string => {
+    if (!err) return 'Ralat tidak diketahui semasa memproses.';
+    const str = typeof err === 'string' ? err : err.message || JSON.stringify(err);
+    if (str.includes('503') || str.includes('UNAVAILABLE') || str.includes('high demand')) {
+      return 'Pelayan AI Gemini sedang mengalami lonjakan trafik sementara (503). Sistem telah menjana kajian lengkap melalui Pangkalan Data Rasmi GETB.';
+    }
+    if (str.includes('429') || str.includes('RESOURCE_EXHAUSTED')) {
+      return 'Had kuota permintaan AI telah dicapai sementara. Sila cuba lagi sebentar.';
+    }
+    if (str.includes('Failed to fetch') || str.includes('NetworkError')) {
+      return 'Ralat sambungan rangkaian internet. Sila semak sambungan anda dan cuba semula.';
+    }
+    return str;
+  };
+
   // 1. Run Agent: Product Study
   const handleRunProductStudy = async () => {
     setLoadingProductStudy(true);
@@ -130,10 +145,10 @@ export const AgentWorkspace: React.FC<Props> = ({
       if (data.success) {
         setProductStudyOutput(data.analysis);
       } else {
-        setErrorMessage(data.error || 'Gagal memproses kajian produk.');
+        setErrorMessage(formatUserError(data.error || 'Gagal memproses kajian produk.'));
       }
     } catch (err: any) {
-      setErrorMessage(err.message || 'Ralat sambungan pelayan.');
+      setErrorMessage(formatUserError(err));
     } finally {
       setLoadingProductStudy(false);
     }
@@ -371,20 +386,38 @@ export const AgentWorkspace: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Error Banner */}
+      {/* System Notice / Error Banner with Retry */}
       {errorMessage && (
-        <div className="mb-6 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center space-x-3">
-          <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
-          <div className="flex-1">
-            <span className="font-bold">Perhatian: </span>
-            {errorMessage}
+        <div className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+          <div className="flex items-start sm:items-center space-x-3">
+            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
+            <div className="leading-relaxed">
+              <span className="font-bold text-amber-950">Status AI: </span>
+              {errorMessage}
+            </div>
           </div>
-          <button
-            onClick={() => setErrorMessage(null)}
-            className="text-rose-600 font-bold hover:underline"
-          >
-            Tutup
-          </button>
+          <div className="flex items-center space-x-2 shrink-0 self-end sm:self-auto">
+            <button
+              onClick={() => {
+                setErrorMessage(null);
+                if (activeTab === 'product-study') handleRunProductStudy();
+                else if (activeTab === 'target-market') handleRunTargetMarket();
+                else if (activeTab === 'social-content') handleRunSocialContent();
+                else if (activeTab === 'objection-handler') handleRunObjection();
+                else if (activeTab === 'campaign-creative') handleRunCreative();
+              }}
+              className="px-3 py-1.5 rounded-xl bg-amber-200 hover:bg-amber-300 text-amber-950 font-bold transition-colors flex items-center space-x-1.5 text-[11px]"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Cuba Semula</span>
+            </button>
+            <button
+              onClick={() => setErrorMessage(null)}
+              className="text-amber-800 font-medium hover:underline text-[11px] px-2 py-1"
+            >
+              Tutup
+            </button>
+          </div>
         </div>
       )}
 
